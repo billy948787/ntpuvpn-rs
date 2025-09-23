@@ -1,6 +1,7 @@
-use std::{net::Ipv4Addr, process::Command};
-
+use futures::executor::block_on;
+use net_route::{Handle, Route};
 use pnet::{datalink, packet::ipv4::Ipv4Packet};
+use std::{net::Ipv4Addr, process::Command};
 use tun_rs::{DeviceBuilder, SyncDevice};
 
 pub struct RerouteServer {
@@ -10,6 +11,9 @@ pub struct RerouteServer {
     vpn_interface: datalink::NetworkInterface,
     vpn_network: Ipv4Addr,
     vpn_mask: Ipv4Addr,
+    orig_default_route: Option<Route>,
+    new_default_route: Route,
+    route_handle: Handle,
 }
 
 impl RerouteServer {
@@ -25,15 +29,19 @@ impl RerouteServer {
             .mtu(1500)
             .build_sync()?;
 
-        Command::new("ip")
-            .arg("route")
-            .arg("add")
-            .arg("default")
-            .arg("dev")
-            .arg(interface_name)
-            .arg("metric")
-            .arg("0")
-            .output()?;
+        let handle = Handle::new()?;
+
+        let mut default_route = None;
+        let new_route =
+            Route::new("0.0.0.0".parse().unwrap(), 0).with_ifindex(device.if_index().unwrap());
+
+        block_on(async {
+            if let Ok(orig_route) = handle.default_route().await {
+                default_route = orig_route.clone();
+            }
+
+            handle.add(&new_route).await.unwrap();
+        });
 
         Ok(Self {
             device,
@@ -42,6 +50,9 @@ impl RerouteServer {
             vpn_network,
             vpn_mask,
             interface_name: interface_name.to_string(),
+            orig_default_route: default_route,
+            route_handle: handle,
+            new_default_route: new_route,
         })
     }
 
@@ -109,15 +120,18 @@ impl RerouteServer {
 
 impl Drop for RerouteServer {
     fn drop(&mut self) {
-        if let Err(e) = Command::new("ip")
-            .arg("route")
-            .arg("del")
-            .arg("default")
-            .arg("dev")
-            .arg(&self.interface_name)
-            .output()
-        {
-            eprintln!("Failed to remove route: {}", e);
-        }
+        block_on(async {
+            // delete the new route
+
+            if let Err(e) = self.route_handle.delete(&self.new_default_route).await {
+                eprintln!("Failed to delete new default route: {}", e);
+            }
+
+            if let Some(orig_route) = &self.orig_default_route {
+                if let Err(e) = self.route_handle.add(orig_route).await {
+                    eprintln!("Failed to restore original default route: {}", e);
+                }
+            }
+        });
     }
 }

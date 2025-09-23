@@ -1,6 +1,5 @@
 use std::{
-    io::Write,
-    os::unix::{fs::PermissionsExt, process::CommandExt},
+    collections::HashSet,
     process::{Command, Stdio},
     time::Duration,
 };
@@ -16,20 +15,10 @@ pub struct VpnSession {
 
 impl VpnSession {
     pub fn new(server: &str, user: &str, password: &str) -> std::io::Result<Self> {
-        let free_interface_str = utils::generate_free_interface_name("tun");
+        let free_interface_str = utils::generate_free_interface_name("utun");
 
-        const VPNC_SCRIPT_CONTENT: &str = "#!/bin/sh\nexit 0\n";
-
-        let mut vpnc_script = tempfile::NamedTempFile::new()?;
-        vpnc_script.write_all(VPNC_SCRIPT_CONTENT.as_bytes())?;
-
-        let mut perms = vpnc_script.as_file().metadata()?.permissions();
-        perms.set_mode(0o755);
-        vpnc_script.as_file().set_permissions(perms)?;
-
-        let vpnc_script_path = "vpnc_script.sh";
-
-        vpnc_script.into_temp_path().persist(vpnc_script_path)?;
+        let existing_interfaces: HashSet<String> =
+            datalink::interfaces().into_iter().map(|i| i.name).collect();
 
         let mut process = Command::new("openconnect")
             .arg("--protocol=pulse")
@@ -37,9 +26,8 @@ impl VpnSession {
             .arg(user)
             .arg("--passwd-on-stdin")
             .arg(server)
-            .arg(format!("--interface={}", free_interface_str))
-            .arg(format!("--script"))
-            .arg(vpnc_script_path)
+            .arg("--interface")
+            .arg(&free_interface_str)
             .stdin(Stdio::piped())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -53,35 +41,31 @@ impl VpnSession {
 
         // Wait for the interface to appear
 
+        let new_interface =
+            Self::wait_for_interface(&existing_interfaces, Duration::from_secs(10))?;
+
         Ok(Self {
             process,
-            interface: Self::wait_for_interface(&free_interface_str, Duration::from_secs(10))?,
+            interface: new_interface,
         })
     }
     fn wait_for_interface(
-        interface_name: &str,
+        existing_interfaces: &HashSet<String>,
         timeout: Duration,
     ) -> std::io::Result<datalink::NetworkInterface> {
         let start = std::time::Instant::now();
-        for _ in 0..1000 {
-            if let Some(iface) = datalink::interfaces()
-                .into_iter()
-                .find(|i| i.name == interface_name)
-            {
-                return Ok(iface);
+        while start.elapsed() < timeout {
+            if let Some(new_iface) = datalink::interfaces().into_iter().find(|i| {
+                i.name.starts_with("utun") && i.is_up() && !existing_interfaces.contains(&i.name)
+            }) {
+                return Ok(new_iface);
             }
-            if start.elapsed() > timeout {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "Interface not found within timeout",
-                ));
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(200));
         }
 
         Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
-            "Interface not found within timeout",
+            "New VPN interface (utun) did not appear within timeout",
         ))
     }
 }

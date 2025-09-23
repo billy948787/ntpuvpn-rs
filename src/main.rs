@@ -9,34 +9,26 @@ use rpassword::read_password;
 use serde::{Deserialize, Serialize};
 
 fn main() {
-    // let config = prompt_config();
-    // // first get dafault interface
-    // if let Some(default_interface) = ntpuvpn_rs::utils::get_default_interface() {
-    //     println!("Default interface: {}", default_interface.name);
-
-    //     // Start VPN session
-    //     let vpn_session = VpnSession::new(&config.server, &config.username, &config.password)
-    //         .expect("Failed to start VPN session");
-
-    //     let mut reroute_server = RerouteServer::new(
-    //         ntpuvpn_rs::utils::generate_free_interface_name("tun").as_str(),
-    //         default_interface,
-    //         vpn_session.interface.clone(),
-    //         config.vpn_network,
-    //         config.vpn_mask,
-    //     )
-    //     .expect("Failed to create reroute server");
-
-    //     reroute_server.run().expect("Failed to run reroute server");
-    // }
-
     let config = prompt_config();
-    let vpn_session = VpnSession::new(&config.server, &config.username, &config.password).unwrap();
+    // first get dafault interface
+    if let Some(default_interface) = ntpuvpn_rs::utils::get_default_interface() {
+        println!("Default interface: {}", default_interface.name);
 
-    let handle = Handle::new().unwrap();
-    let route = Route::new(config.vpn_network.into(), 8);
+        // Start VPN session
+        let vpn_session = VpnSession::new(&config.server, &config.username, &config.password)
+            .expect("Failed to start VPN session");
 
-    handle.add(&route);
+        let mut reroute_server = RerouteServer::new(
+            ntpuvpn_rs::utils::generate_free_interface_name("utun").as_str(),
+            default_interface,
+            vpn_session.interface.clone(),
+            config.vpn_network,
+            config.vpn_mask,
+        )
+        .expect("Failed to create reroute server");
+
+        reroute_server.run().expect("Failed to run reroute server");
+    }
 }
 
 fn prompt_config() -> Config {
