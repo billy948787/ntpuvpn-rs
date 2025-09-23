@@ -7,27 +7,40 @@ use ntpuvpn_rs::reroute_server::RerouteServer;
 use ntpuvpn_rs::vpn_server::VpnSession;
 use rpassword::read_password;
 use serde::{Deserialize, Serialize};
-
-fn main() {
+#[tokio::main]
+async fn main() {
     let config = prompt_config();
     // first get dafault interface
     if let Some(default_interface) = ntpuvpn_rs::utils::get_default_interface() {
         println!("Default interface: {}", default_interface.name);
 
+        let handle = Handle::new().expect("Failed to create route handle");
+        let default_route = handle
+            .default_route()
+            .await
+            .expect("Failed to get default route");
+        println!("Default route: {:?}", default_route);
+
         // Start VPN session
         let vpn_session = VpnSession::new(&config.server, &config.username, &config.password)
+            .await
             .expect("Failed to start VPN session");
 
         let mut reroute_server = RerouteServer::new(
             ntpuvpn_rs::utils::generate_free_interface_name("utun").as_str(),
             default_interface,
+            default_route,
             vpn_session.interface.clone(),
             config.vpn_network,
             config.vpn_mask,
         )
+        .await
         .expect("Failed to create reroute server");
 
-        reroute_server.run().expect("Failed to run reroute server");
+        reroute_server
+            .run()
+            .await
+            .expect("Failed to run reroute server");
     }
 }
 
