@@ -26,8 +26,6 @@ impl RerouteServer {
             handle.delete(&current_route_with_vpn).await?;
         }
 
-        println!("now route: {:?}", handle.list().await?);
-
         let vpn_route = Route::new(IpAddr::V4("10.0.0.0".parse().unwrap()), 8)
             // .with_ifindex(vpn_interface.index);
             .with_gateway("120.126.206.150".parse().unwrap());

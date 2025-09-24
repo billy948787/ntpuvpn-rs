@@ -45,6 +45,15 @@ impl VpnSession {
             }
         }
 
+        if let Some(stderr) = process.stderr.take() {
+            let mut reader = BufReader::new(stderr).lines();
+            tokio::spawn(async move {
+                while let Some(line) = reader.next_line().await.unwrap_or(None) {
+                    eprintln!("openconnect stderr: {}", line);
+                }
+            });
+        }
+
         let new_interface =
             Self::wait_for_interface(&existing_interfaces, Duration::from_secs(10)).await?;
 
