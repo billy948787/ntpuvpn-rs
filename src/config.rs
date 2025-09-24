@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
-    pub server: String,
     pub username: String,
     pub password: String,
     pub vpn_network: Ipv4Addr,

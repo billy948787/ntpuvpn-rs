@@ -5,7 +5,6 @@ use crate::utils;
 use pnet::datalink;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tun_rs::DeviceBuilder;
 
 pub struct VpnSession {
     process: Child,
@@ -21,11 +20,9 @@ impl VpnSession {
 
         let mut process = Command::new("openconnect")
             .arg("--protocol=pulse")
-            .arg("--user")
-            .arg(user)
+            .arg(format!("--user={}", user))
             .arg("--passwd-on-stdin")
-            .arg("--interface")
-            .arg(&free_interface_str)
+            .arg(format!("--interface={}", free_interface_str))
             .arg(server)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

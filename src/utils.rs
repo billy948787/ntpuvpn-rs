@@ -1,5 +1,4 @@
-use net_route::Handle;
-use pnet::datalink::{self, NetworkInterface};
+use pnet::datalink;
 
 // may not work on all platforms
 pub fn get_default_interface() -> Option<datalink::NetworkInterface> {
