@@ -14,6 +14,7 @@ pub struct RerouteServer {
 impl RerouteServer {
     pub async fn new(
         default_interface: datalink::NetworkInterface,
+        vpn_interface: datalink::NetworkInterface,
         original_route: Option<Route>,
     ) -> std::io::Result<Self> {
         let handle = Handle::new()?;
@@ -28,7 +29,7 @@ impl RerouteServer {
 
         let vpn_route = Route::new(IpAddr::V4("10.0.0.0".parse().unwrap()), 8)
             // .with_ifindex(vpn_interface.index);
-            .with_gateway("120.126.206.150".parse().unwrap());
+            .with_ifindex(vpn_interface.index);
 
         let default_route = Route::new(IpAddr::V4("0.0.0.0".parse().unwrap()), 0)
             .with_ifindex(default_interface.index)

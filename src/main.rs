@@ -48,9 +48,13 @@ async fn main() {
             .set_password(&password)
             .expect("Failed to set password in keyring");
 
-        let mut reroute_server = RerouteServer::new(default_interface, default_route)
-            .await
-            .expect("Failed to create reroute server");
+        let mut reroute_server = RerouteServer::new(
+            default_interface,
+            _vpn_session.interface.clone(),
+            default_route,
+        )
+        .await
+        .expect("Failed to create reroute server");
 
         reroute_server
             .run()
