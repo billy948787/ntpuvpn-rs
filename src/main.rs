@@ -1,5 +1,7 @@
+use std::fs;
 use std::io::{self, Write};
 use std::net::Ipv4Addr;
+use std::path::PathBuf;
 
 use net_route::Handle;
 use ntpuvpn_rs::config::Config;
@@ -20,12 +22,9 @@ async fn main() {
             pwd
         }
         Err(_) => {
-            println!("Storing password in keyring.");
             io::stdout().flush().unwrap();
             let password = read_password().unwrap();
-            keyring_entry
-                .set_password(&password)
-                .expect("Failed to store password in keyring");
+
             password
         }
     };
@@ -45,6 +44,11 @@ async fn main() {
             .await
             .expect("Failed to start VPN session");
 
+        // if the vpn session is established, set keyring password
+        keyring_entry
+            .set_password(&password)
+            .expect("Failed to set password in keyring");
+
         let mut reroute_server = RerouteServer::new(default_interface, default_route)
             .await
             .expect("Failed to create reroute server");
@@ -57,6 +61,18 @@ async fn main() {
 }
 
 fn prompt_config() -> Config {
+    let config_dir = dirs::config_dir()
+        .expect("Failed to get config directory")
+        .join("ntpuvpn-rs");
+    let config_path = config_dir.join("config.json");
+
+    if config_path.exists() {
+        let config_data =
+            fs::read_to_string(&config_path).expect("Failed to read existing config file");
+        let config: Config =
+            serde_json::from_str(&config_data).expect("Failed to parse existing config file");
+        return config;
+    }
     println!("Enter VPN details:");
 
     print!("Username: ");
@@ -70,10 +86,18 @@ fn prompt_config() -> Config {
     let vpn_network = Ipv4Addr::new(10, 0, 0, 0);
     let vpn_mask = Ipv4Addr::new(255, 0, 0, 0);
 
-    Config {
+    let config = Config {
         username,
 
         vpn_network,
         vpn_mask,
-    }
+    };
+
+    fs::create_dir_all(&config_dir).expect("Failed to create config directory");
+    let config_path = config_dir.join("config.json");
+    let config_json = serde_json::to_string_pretty(&config).expect("Failed to serialize config");
+    fs::write(&config_path, config_json).expect("Failed to write config file");
+    println!("Config saved to: {}", config_path.display());
+
+    config
 }

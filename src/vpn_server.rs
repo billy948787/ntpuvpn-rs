@@ -24,7 +24,6 @@ impl VpnSession {
             .arg("--passwd-on-stdin")
             .arg(format!("--interface={}", free_interface_str))
             .arg(server)
-            .arg("--non-inter")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -35,51 +34,24 @@ impl VpnSession {
             stdin.write_all(b"\n").await?;
         }
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         if let Some(stdout) = process.stdout.take() {
-            let tx = tx.clone();
-            tokio::spawn(async move {
-                let mut reader = BufReader::new(stdout).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    println!("openconnect stdout: {}", line);
-                    if line.contains("ESP session established") {
-                        let _ = tx.send("SESSION_ESTABLISHED".to_string());
-                        break;
-                    }
-                }
-            });
-        }
-
-        if let Some(stderr) = process.stderr.take() {
-            let tx = tx.clone();
-            tokio::spawn(async move {
-                let mut reader = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    eprintln!("openconnect stderr: {}", line);
-                }
-            });
-        }
-
-        let mut session_ok = false;
-        let start = tokio::time::Instant::now();
-        while start.elapsed() < Duration::from_secs(30) {
-            if let Some(msg) = rx.recv().await {
-                if msg == "SESSION_ESTABLISHED" {
+            let mut reader = BufReader::new(stdout).lines();
+            while let Some(line) = reader.next_line().await? {
+                println!("openconnect stdout: {}", line);
+                if line.contains("ESP session established") {
                     println!("VPN session established!");
-                    session_ok = true;
                     break;
-                } else {
                 }
-            } else {
-                break;
             }
         }
 
-        if !session_ok {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "Timeout waiting for ESP session established",
-            ));
+        if let Some(stderr) = process.stderr.take() {
+            let mut reader = BufReader::new(stderr).lines();
+            tokio::spawn(async move {
+                while let Some(line) = reader.next_line().await.unwrap_or(None) {
+                    eprintln!("openconnect stderr: {}", line);
+                }
+            });
         }
 
         let new_interface =
