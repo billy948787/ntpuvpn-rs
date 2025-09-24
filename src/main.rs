@@ -1,7 +1,6 @@
 use std::fs;
 use std::io::{self, Write};
 use std::net::Ipv4Addr;
-use std::path::PathBuf;
 
 use net_route::Handle;
 use ntpuvpn_rs::config::Config;
