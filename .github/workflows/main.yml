@@ -68,6 +68,10 @@ jobs:
           }
           # echo "INCLUDE=$env:INCLUDE;$sdkExtractPath\WpdPack\Include" | Out-File -FilePath $GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Npcap SDK setup complete for pnet."
+          Write-Host "Verifying files in $projectRoot..."
+          Get-ChildItem -Recurse $projectRoot | Select-Object FullName, Name, Psalms | Format-Table -AutoSize
+          Get-ChildItem -Path $projectLibDir -Recurse | Select-Object FullName, Name 
+          Write-Host "Npcap SDK setup complete for pnet."
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           # (required) Comma-separated list of binary names (non-extension portion of filename) to build and upload.
