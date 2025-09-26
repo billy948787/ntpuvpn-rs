@@ -1,7 +1,6 @@
 use std::net::IpAddr;
 
 use net_route::{Handle, Route};
-use pnet::datalink;
 use tokio::runtime::Runtime;
 
 pub struct RerouteServer {
@@ -13,8 +12,8 @@ pub struct RerouteServer {
 
 impl RerouteServer {
     pub async fn new(
-        default_interface: datalink::NetworkInterface,
-        vpn_interface: datalink::NetworkInterface,
+        default_interface_index: u32,
+        vpn_interface_index: u32,
         original_route: Option<Route>,
     ) -> std::io::Result<Self> {
         let handle = Handle::new()?;
@@ -29,10 +28,10 @@ impl RerouteServer {
 
         let vpn_route = Route::new(IpAddr::V4("10.0.0.0".parse().unwrap()), 8)
             // .with_ifindex(vpn_interface.index);
-            .with_ifindex(vpn_interface.index);
+            .with_ifindex(vpn_interface_index);
 
         let default_route = Route::new(IpAddr::V4("0.0.0.0".parse().unwrap()), 0)
-            .with_ifindex(default_interface.index)
+            .with_ifindex(default_interface_index)
             .with_gateway(original_route.clone().unwrap().gateway.unwrap());
 
         Self::add_ignore_exists(&handle, &default_route).await?;

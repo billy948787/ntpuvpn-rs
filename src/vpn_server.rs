@@ -2,21 +2,30 @@ use std::process::Stdio;
 use std::{collections::HashSet, time::Duration};
 
 use crate::utils;
-use pnet::datalink;
+use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 
 pub struct VpnSession {
     process: Child,
-    pub interface: datalink::NetworkInterface,
+    pub interface_index: u32,
 }
 
 impl VpnSession {
     pub async fn new(server: &str, user: &str, password: &str) -> std::io::Result<Self> {
         let free_interface_str = utils::generate_free_interface_name("utun");
 
-        let existing_interfaces: HashSet<String> =
-            datalink::interfaces().into_iter().map(|i| i.name).collect();
+        let existing_interfaces: HashSet<String> = network_interface::NetworkInterface::show()
+            .map_err(|e| {
+                eprintln!("Failed to get existing network interfaces: {}", e);
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Failed to get existing network interfaces",
+                )
+            })?
+            .into_iter()
+            .map(|i| i.name)
+            .collect();
 
         let mut process = Command::new("openconnect")
             .arg("--protocol=pulse")
@@ -61,18 +70,25 @@ impl VpnSession {
 
         Ok(Self {
             process,
-            interface: new_interface,
+            interface_index: new_interface.index,
         })
     }
     async fn wait_for_interface(
         existing_interfaces: &HashSet<String>,
         timeout: Duration,
-    ) -> std::io::Result<datalink::NetworkInterface> {
+    ) -> std::io::Result<NetworkInterface> {
         let start = tokio::time::Instant::now();
         while start.elapsed() < timeout {
-            if let Some(new_iface) = datalink::interfaces().into_iter().find(|i| {
-                i.name.starts_with("utun") && i.is_up() && !existing_interfaces.contains(&i.name)
-            }) {
+            if let Some(new_iface) = network_interface::NetworkInterface::show()
+                .map_err(|e| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Failed to get network interfaces: {}", e),
+                    )
+                })?
+                .into_iter()
+                .find(|i| i.name.starts_with("utun") && !existing_interfaces.contains(&i.name))
+            {
                 return Ok(new_iface);
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
