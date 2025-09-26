@@ -57,14 +57,14 @@ jobs:
               New-Item -ItemType Directory -Path $projectLibDir
           }
 
-          $packetLibSource = Join-Path $sdkExtractPath "WpdPack\Lib\x64\Packet.lib"
+          $packetLibSource = Join-Path $sdkExtractPath "Lib\x64\Packet.lib"
           $packetLibDestination = Join-Path $projectLibDir "Packet.lib"
           if (Test-Path $packetLibSource) {
               Write-Host "Copying $packetLibSource to $packetLibDestination..."
               Copy-Item -Path $packetLibSource -Destination $packetLibDestination
           } else {
               Write-Error "Error: Packet.lib not found at $packetLibSource. Please check Npcap SDK structure."
-              exit 1 # 終止作業
+              exit 1
           }
           # echo "INCLUDE=$env:INCLUDE;$sdkExtractPath\WpdPack\Include" | Out-File -FilePath $GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Npcap SDK setup complete for pnet."
