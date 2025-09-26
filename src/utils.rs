@@ -1,18 +1,15 @@
-use pnet::datalink;
-
-// may not work on all platforms
-pub fn get_default_interface() -> Option<datalink::NetworkInterface> {
-    let interfaces = datalink::interfaces();
-    for interface in interfaces {
-        if interface.is_up() && !interface.is_loopback() && !interface.ips.is_empty() {
-            return Some(interface);
-        }
-    }
-    None
-}
+use network_interface::NetworkInterfaceConfig;
 
 pub fn check_free_interface_name(name: &str) -> bool {
-    let interfaces = datalink::interfaces();
+    let interfaces = network_interface::NetworkInterface::show()
+        .map_err(|e| {
+            eprintln!("Failed to get network interfaces: {}", e);
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to get network interfaces",
+            )
+        })
+        .unwrap_or_else(|_| vec![]);
     for interface in interfaces {
         if interface.name == name {
             return false;

@@ -27,15 +27,14 @@ async fn main() {
             password
         }
     };
-    // first get dafault interface
-    if let Some(default_interface) = ntpuvpn_rs::utils::get_default_interface() {
-        println!("Default interface: {}", default_interface.name);
 
-        let handle = Handle::new().expect("Failed to create route handle");
-        let default_route = handle
-            .default_route()
-            .await
-            .expect("Failed to get default route");
+    let handle = Handle::new().expect("Failed to create netlink handle");
+
+    if let Some(default_route) = handle
+        .default_route()
+        .await
+        .expect("Failed to get default route")
+    {
         println!("Default route: {:?}", default_route);
 
         // Start VPN session
@@ -49,9 +48,11 @@ async fn main() {
             .expect("Failed to set password in keyring");
 
         let mut reroute_server = RerouteServer::new(
-            default_interface,
-            _vpn_session.interface.clone(),
-            default_route,
+            default_route
+                .ifindex
+                .expect("Default route has no interface index"),
+            _vpn_session.interface_index,
+            Some(default_route),
         )
         .await
         .expect("Failed to create reroute server");
