@@ -67,9 +67,9 @@ jobs:
               exit 1
           }
 
-          echo "LIB=$env:LIB;$projectLibDir" | Out-File -FilePath $GITHUB_ENV -Encoding utf8 -Append
-          echo "INCLUDE=$env:INCLUDE;$projectIncludeDir" | Out-File -FilePath $GITHUB_ENV -Encoding utf8 -Append
-          echo "RUSTFLAGS=$env:RUSTFLAGS -L native=$projectLibDir" | Out-File -FilePath $GITHUB_ENV -Encoding utf8 -Append
+          echo "LIB=$env:LIB;$projectLibDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "INCLUDE=$env:INCLUDE;$projectIncludeDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "RUSTFLAGS=$env:RUSTFLAGS -L native=$projectLibDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Current LIB environment variable: $env:LIB"
           Write-Host "Current INCLUDE environment variable: $env:INCLUDE"
           Write-Host "Current RUSTFLAGS environment variable: $env:RUSTFLAGS -L native=$projectLibDir"
