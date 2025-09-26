@@ -40,44 +40,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libdbus-1-dev pkg-config
-      - name: Setup pnet dependencies (Windows)
-        if: matrix.target == 'x86_64-pc-windows-msvc'
-        shell: pwsh
-        run: |
-          $npcapSdkUrl = "https://nmap.org/npcap/dist/npcap-sdk-1.15.zip"
-          $sdkZip = "npcap-sdk-1.15.zip"
-          $sdkExtractPath = "C:\NpcapSdkTemp"
-          Write-Host "Downloading Npcap SDK from $npcapSdkUrl..."
-          Invoke-WebRequest -Uri $npcapSdkUrl -OutFile $sdkZip
-          
-          Write-Host "Extracting Npcap SDK to $sdkExtractPath..."
-          Expand-Archive -Path $sdkZip -DestinationPath $sdkExtractPath -Force
-          $projectLibDir = Join-Path $env:GITHUB_WORKSPACE "lib"
-          if ( -not (Test-Path $projectLibDir) ) {
-              New-Item -ItemType Directory -Path $projectLibDir
-          }
-
-          $packetLibSource = Join-Path $sdkExtractPath "Lib\x64\Packet.lib"
-          $packetLibDestination = Join-Path $projectLibDir "Packet.lib"
-          if (Test-Path $packetLibSource) {
-              Write-Host "Copying $packetLibSource to $packetLibDestination..."
-              Copy-Item -Path $packetLibSource -Destination $packetLibDestination
-          } else {
-              Write-Error "Error: Packet.lib not found at $packetLibSource. Please check Npcap SDK structure."
-              exit 1
-          }
-
-          echo "LIB=$env:LIB;$projectLibDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "INCLUDE=$env:INCLUDE;$projectIncludeDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "RUSTFLAGS=$env:RUSTFLAGS -L native=$projectLibDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Current LIB environment variable: $env:LIB"
-          Write-Host "Current INCLUDE environment variable: $env:INCLUDE"
-          Write-Host "Current RUSTFLAGS environment variable: $env:RUSTFLAGS -L native=$projectLibDir"
-          Write-Host "Npcap SDK setup complete for pnet."
-          Write-Host "Verifying files in $projectRoot..."
-          Get-ChildItem -Recurse $projectRoot | Select-Object FullName, Name, Psalms | Format-Table -AutoSize
-          Get-ChildItem -Path $projectLibDir -Recurse | Select-Object FullName, Name 
-          Write-Host "Npcap SDK setup complete for pnet."
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           # (required) Comma-separated list of binary names (non-extension portion of filename) to build and upload.
