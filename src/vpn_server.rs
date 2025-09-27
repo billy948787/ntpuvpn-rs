@@ -23,6 +23,7 @@ impl VpnSession {
             .arg(format!("--user={}", user))
             .arg("--passwd-on-stdin")
             .arg(format!("--interface={}", free_interface_str))
+            .arg("--servercert pin-sha256:22pJm4rVqQzS08m42MkF9t+bhNbExgX3ozmLdDvvZnw=")
             .arg(server)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
