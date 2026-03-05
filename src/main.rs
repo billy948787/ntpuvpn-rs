@@ -38,7 +38,7 @@ async fn main() {
         println!("Default route: {:?}", default_route);
 
         // Start VPN session
-        let _vpn_session = VpnSession::new("ntpu.twaren.net", &config.username, &password)
+        let vpn_session = VpnSession::new("ntpu.twaren.net", &config.username, &password)
             .await
             .expect("Failed to start VPN session");
 
@@ -51,7 +51,7 @@ async fn main() {
             default_route
                 .ifindex
                 .expect("Default route has no interface index"),
-            _vpn_session.interface_index,
+            vpn_session.interface_index,
             Some(default_route),
         )
         .await
@@ -61,6 +61,8 @@ async fn main() {
             .run()
             .await
             .expect("Failed to run reroute server");
+        drop(reroute_server);
+        drop(vpn_session);
     }
 }
 

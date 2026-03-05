@@ -28,7 +28,7 @@ impl VpnSession {
             .collect();
 
         let mut process = Command::new("openconnect")
-            .arg("--protocol=pulse")
+            .arg("--protocol=nc")
             .arg(format!("--user={}", user))
             .arg("--passwd-on-stdin")
             .arg(format!("--interface={}", free_interface_str))

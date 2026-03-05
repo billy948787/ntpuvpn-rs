@@ -55,19 +55,44 @@ impl RerouteServer {
         }
     }
     pub async fn run(&mut self) -> std::io::Result<()> {
-        loop {}
+        tokio::signal::ctrl_c().await?;
+        println!("Received Ctrl+C, exiting...");
+        Ok(())
     }
 }
 impl Drop for RerouteServer {
     fn drop(&mut self) {
-        let rt = Runtime::new().unwrap();
-        rt.block_on(async {
-            self.handle.delete(&self.vpn_route).await.ok();
-            self.handle.delete(&self.new_default_route).await.ok();
+        let vpn_route = self.vpn_route.clone();
+        let orig_default_route = self.orig_default_route.clone();
 
-            if let Some(orig_route) = &self.orig_default_route {
-                self.handle.add(orig_route).await.ok();
-            }
-        });
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let handle = match Handle::new() {
+                        Ok(h) => h,
+                        Err(e) => {
+                            eprintln!("Cleanup: failed to create route handle: {}", e);
+                            return;
+                        }
+                    };
+                    handle.delete(&vpn_route).await.ok();
+
+                    while let Ok(Some(current)) = handle.default_route().await {
+                        if handle.delete(&current).await.is_err() {
+                            break;
+                        }
+                    }
+
+                    if let Some(orig_route) = &orig_default_route {
+                        println!("Restoring original default route: {:?}", orig_route);
+                        handle.add(orig_route).await.ok();
+                    }
+                });
+        })
+        .join()
+        .ok();
     }
 }
