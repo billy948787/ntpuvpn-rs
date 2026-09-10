@@ -1,91 +1,95 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use net_route::{Handle, Route};
 
 pub struct RerouteServer {
-    orig_default_route: Option<Route>,
     vpn_route: Route,
+    vpn_route_added: bool,
 }
 
 impl RerouteServer {
     pub async fn new(
-        default_interface_index: u32,
         vpn_interface_index: u32,
-        original_route: Option<Route>,
+        vpn_network: Ipv4Addr,
+        vpn_prefix: u8,
+        original_route: Route,
     ) -> std::io::Result<Self> {
         let handle = Handle::new()?;
 
-        if let Ok(Some(current_route_with_vpn)) = handle.default_route().await {
-            println!(
-                "Removing existing default route: {:?}",
-                current_route_with_vpn
-            );
-            handle.delete(&current_route_with_vpn).await?;
+        // OpenConnect may install a full-tunnel default route. Restore the route
+        // captured before connecting so only the configured VPN network is tunneled.
+        if let Some(current_route) = handle.default_route().await?
+            && current_route != original_route
+        {
+            println!("Removing VPN default route: {:?}", current_route);
+            handle.delete(&current_route).await?;
         }
+        Self::add_ignore_exists(&handle, &original_route).await?;
 
-        let vpn_route = Route::new(IpAddr::V4("10.0.0.0".parse().unwrap()), 8)
-            // .with_ifindex(vpn_interface.index);
-            .with_ifindex(vpn_interface_index);
+        let vpn_route =
+            Route::new(IpAddr::V4(vpn_network), vpn_prefix).with_ifindex(vpn_interface_index);
+        let vpn_route_added = Self::add_ignore_exists(&handle, &vpn_route).await?;
 
-        let default_route = Route::new(IpAddr::V4("0.0.0.0".parse().unwrap()), 0)
-            .with_ifindex(default_interface_index)
-            .with_gateway(original_route.clone().unwrap().gateway.unwrap());
-
-        Self::add_ignore_exists(&handle, &default_route).await?;
-        Self::add_ignore_exists(&handle, &vpn_route).await?;
-
-        Ok(RerouteServer {
-            orig_default_route: original_route,
+        Ok(Self {
             vpn_route,
+            vpn_route_added,
         })
     }
-    async fn add_ignore_exists(handle: &Handle, route: &Route) -> std::io::Result<()> {
-        match handle.add(route).await {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                println!("Route already exists, skipping add: {:?}", route);
+
+    async fn add_ignore_exists(handle: &Handle, route: &Route) -> std::io::Result<bool> {
+        if handle
+            .list()
+            .await?
+            .iter()
+            .any(|existing| existing == route)
+        {
+            println!("Route already exists, skipping add: {:?}", route);
+            return Ok(false);
+        }
+
+        handle.add(route).await?;
+        Ok(true)
+    }
+
+    pub async fn shutdown(&mut self) -> std::io::Result<()> {
+        if !self.vpn_route_added {
+            return Ok(());
+        }
+
+        let handle = Handle::new()?;
+        match handle.delete(&self.vpn_route).await {
+            Ok(()) => {
+                self.vpn_route_added = false;
                 Ok(())
             }
-            Err(e) => Err(e),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.vpn_route_added = false;
+                Ok(())
+            }
+            Err(error) => Err(error),
         }
     }
-    pub async fn run(&mut self) -> std::io::Result<()> {
-        tokio::signal::ctrl_c().await?;
-        println!("Received Ctrl+C, exiting...");
-        Ok(())
-    }
 }
+
 impl Drop for RerouteServer {
     fn drop(&mut self) {
-        let vpn_route = self.vpn_route.clone();
-        let orig_default_route = self.orig_default_route.clone();
+        if !self.vpn_route_added {
+            return;
+        }
 
+        let vpn_route = self.vpn_route.clone();
         std::thread::spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .unwrap()
-                .block_on(async {
-                    let handle = match Handle::new() {
-                        Ok(h) => h,
-                        Err(e) => {
-                            eprintln!("Cleanup: failed to create route handle: {}", e);
-                            return;
-                        }
-                    };
-                    handle.delete(&vpn_route).await.ok();
-
-                    while let Ok(Some(current)) = handle.default_route().await {
-                        if handle.delete(&current).await.is_err() {
-                            break;
-                        }
-                    }
-
-                    if let Some(orig_route) = &orig_default_route {
-                        println!("Restoring original default route: {:?}", orig_route);
-                        handle.add(orig_route).await.ok();
-                    }
-                });
+            else {
+                return;
+            };
+            runtime.block_on(async move {
+                if let Ok(handle) = Handle::new() {
+                    let _ = handle.delete(&vpn_route).await;
+                }
+            });
         })
         .join()
         .ok();

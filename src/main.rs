@@ -13,14 +13,16 @@ async fn main() {
 
     let service = "ntpuvpn-rs";
 
-    let keyring_entry =
-        keyring::Entry::new(service, &config.username).expect("Failed to create keyring entry");
-    let (password, password_from_keyring) = match keyring_entry.get_password() {
-        Ok(pwd) => {
+    let keyring_entry = keyring::Entry::new(service, &config.username).ok();
+    let (password, password_from_keyring) = match keyring_entry
+        .as_ref()
+        .and_then(|entry| entry.get_password().ok())
+    {
+        Some(pwd) => {
             println!("Retrieved password from keyring.");
             (pwd, true)
         }
-        Err(_) => {
+        None => {
             print!("Password: ");
             io::stdout().flush().unwrap();
             let password = read_password().unwrap();
@@ -29,50 +31,77 @@ async fn main() {
         }
     };
 
-    let handle = Handle::new().expect("Failed to create netlink handle");
+    let vpn_prefix = config.vpn_prefix().expect("Invalid VPN netmask");
+    let handle = Handle::new().expect("Failed to access the system routing table");
 
-    if let Some(default_route) = handle
+    let Some(default_route) = handle
         .default_route()
         .await
         .expect("Failed to get default route")
-    {
-        println!("Default route: {:?}", default_route);
+    else {
+        eprintln!("No default route was found");
+        return;
+    };
+    println!("Default route: {:?}", default_route);
 
-        // Start VPN session
-        let vpn_session =
-            match VpnSession::new("ntpu.twaren.net", &config.username, &password).await {
-                Ok(session) => session,
-                Err(error) => {
-                    if password_from_keyring {
-                        let _ = keyring_entry.delete_credential();
-                        eprintln!("Removed the cached password; enter it again on the next run.");
+    // Start VPN session
+    let mut vpn_session =
+        match VpnSession::new("ntpu.twaren.net", &config.username, &password).await {
+            Ok(session) => session,
+            Err(error) => {
+                if password_from_keyring {
+                    if let Some(entry) = &keyring_entry {
+                        let _ = entry.delete_credential();
                     }
-                    eprintln!("Failed to start VPN session: {error}");
-                    return;
+                    eprintln!("Removed the cached password; enter it again on the next run.");
                 }
-            };
+                eprintln!("Failed to start VPN session: {error}");
+                return;
+            }
+        };
 
-        // if the vpn session is established, set keyring password
-        keyring_entry
-            .set_password(&password)
-            .expect("Failed to set password in keyring");
+    // if the vpn session is established, set keyring password
+    if let Some(entry) = &keyring_entry
+        && let Err(error) = entry.set_password(&password)
+    {
+        eprintln!("Warning: failed to save password in keyring: {error}");
+    }
 
-        let mut reroute_server = RerouteServer::new(
-            default_route
-                .ifindex
-                .expect("Default route has no interface index"),
-            vpn_session.interface_index,
-            Some(default_route),
-        )
-        .await
-        .expect("Failed to create reroute server");
+    let mut reroute_server = match RerouteServer::new(
+        vpn_session.interface_index,
+        config.normalized_vpn_network(),
+        vpn_prefix,
+        default_route,
+    )
+    .await
+    {
+        Ok(server) => server,
+        Err(error) => {
+            let _ = vpn_session.shutdown().await;
+            eprintln!("Failed to configure VPN routes: {error}");
+            return;
+        }
+    };
 
-        reroute_server
-            .run()
-            .await
-            .expect("Failed to run reroute server");
-        drop(reroute_server);
-        drop(vpn_session);
+    tokio::select! {
+        signal = tokio::signal::ctrl_c() => {
+            if let Err(error) = signal {
+                eprintln!("Failed to listen for Ctrl+C: {error}");
+            } else {
+                println!("Received Ctrl+C, exiting...");
+            }
+        },
+        status = vpn_session.wait() => match status {
+            Ok(()) => eprintln!("VPN connection ended"),
+            Err(error) => eprintln!("VPN connection ended with an error: {error}"),
+        },
+    }
+
+    if let Err(error) = reroute_server.shutdown().await {
+        eprintln!("Failed to remove VPN route: {error}");
+    }
+    if let Err(error) = vpn_session.shutdown().await {
+        eprintln!("Failed to stop VPN connection: {error}");
     }
 }
 
