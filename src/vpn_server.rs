@@ -1,9 +1,9 @@
 use std::process::Stdio;
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 use crate::utils;
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 
 pub struct VpnSession {
@@ -15,28 +15,17 @@ impl VpnSession {
     pub async fn new(server: &str, user: &str, password: &str) -> std::io::Result<Self> {
         let free_interface_str = utils::generate_free_interface_name("utun");
 
-        let existing_interfaces: HashSet<String> = network_interface::NetworkInterface::show()
-            .map_err(|e| {
-                eprintln!("Failed to get existing network interfaces: {}", e);
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Failed to get existing network interfaces",
-                )
-            })?
-            .into_iter()
-            .map(|i| i.name)
-            .collect();
-
         let mut process = Command::new("openconnect")
             .arg("--protocol=nc")
             .arg(format!("--user={}", user))
             .arg("--passwd-on-stdin")
+            .arg("--non-inter")
             .arg(format!("--interface={}", free_interface_str))
             .arg(server)
-            // .arg("--useragent=Pulse-Secure/9.1R18")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .kill_on_drop(true)
             .spawn()?;
 
         if let Some(mut stdin) = process.stdin.take() {
@@ -44,64 +33,97 @@ impl VpnSession {
             stdin.write_all(b"\n").await?;
         }
 
-        if let Some(stdout) = process.stdout.take() {
-            let mut reader = BufReader::new(stdout).lines();
-            while let Some(line) = reader.next_line().await? {
-                println!("openconnect stdout: {}", line);
-                if line.contains("ESP session established") {
-                    println!("VPN session established!");
-                    break;
+        let stdout_task = process
+            .stdout
+            .take()
+            .map(|stdout| Self::log_output(stdout, false));
+
+        let stderr_task = process
+            .stderr
+            .take()
+            .map(|stderr| Self::log_output(stderr, true));
+
+        let new_interface = match Self::wait_for_interface(
+            &free_interface_str,
+            &mut process,
+            Duration::from_secs(30),
+        )
+        .await
+        {
+            Ok(interface) => interface,
+            Err(error) => {
+                let _ = process.kill().await;
+                let _ = process.wait().await;
+                if let Some(task) = stdout_task {
+                    let _ = task.await;
                 }
+                if let Some(task) = stderr_task {
+                    let _ = task.await;
+                }
+                return Err(error);
             }
-        }
+        };
 
-        if let Some(stderr) = process.stderr.take() {
-            let mut reader = BufReader::new(stderr).lines();
-            tokio::spawn(async move {
-                while let Some(line) = reader.next_line().await.unwrap_or(None) {
-                    eprintln!("openconnect stderr: {}", line);
-                }
-            });
-        }
-
-        let new_interface =
-            Self::wait_for_interface(&existing_interfaces, Duration::from_secs(10)).await?;
+        println!("VPN session established on {}", new_interface.name);
 
         Ok(Self {
             process,
             interface_index: new_interface.index,
         })
     }
+
+    fn log_output<R>(output: R, stderr: bool) -> tokio::task::JoinHandle<()>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+    {
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(output).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if stderr {
+                    eprintln!("openconnect: {}", line);
+                } else {
+                    println!("openconnect: {}", line);
+                }
+            }
+        })
+    }
+
     async fn wait_for_interface(
-        existing_interfaces: &HashSet<String>,
+        interface_name: &str,
+        process: &mut Child,
         timeout: Duration,
     ) -> std::io::Result<NetworkInterface> {
         let start = tokio::time::Instant::now();
         while start.elapsed() < timeout {
             if let Some(new_iface) = network_interface::NetworkInterface::show()
                 .map_err(|e| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to get network interfaces: {}", e),
-                    )
+                    std::io::Error::other(format!("Failed to get network interfaces: {}", e))
                 })?
                 .into_iter()
-                .find(|i| i.name.starts_with("utun") && !existing_interfaces.contains(&i.name))
+                .find(|i| i.name == interface_name)
             {
                 return Ok(new_iface);
             }
+
+            if let Some(status) = process.try_wait()? {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionAborted,
+                    format!("openconnect exited before establishing the VPN ({status})"),
+                ));
+            }
+
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
 
         Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
-            "New VPN interface (utun) did not appear within timeout",
+            format!("VPN interface {interface_name} did not appear within 30 seconds"),
         ))
     }
 }
 
 impl Drop for VpnSession {
     fn drop(&mut self) {
-        let _ = self.process.kill();
+        let _ = self.process.start_kill();
     }
 }

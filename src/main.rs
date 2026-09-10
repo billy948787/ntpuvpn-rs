@@ -15,16 +15,17 @@ async fn main() {
 
     let keyring_entry =
         keyring::Entry::new(service, &config.username).expect("Failed to create keyring entry");
-    let password = match keyring_entry.get_password() {
+    let (password, password_from_keyring) = match keyring_entry.get_password() {
         Ok(pwd) => {
             println!("Retrieved password from keyring.");
-            pwd
+            (pwd, true)
         }
         Err(_) => {
+            print!("Password: ");
             io::stdout().flush().unwrap();
             let password = read_password().unwrap();
 
-            password
+            (password, false)
         }
     };
 
@@ -38,9 +39,18 @@ async fn main() {
         println!("Default route: {:?}", default_route);
 
         // Start VPN session
-        let vpn_session = VpnSession::new("ntpu.twaren.net", &config.username, &password)
-            .await
-            .expect("Failed to start VPN session");
+        let vpn_session =
+            match VpnSession::new("ntpu.twaren.net", &config.username, &password).await {
+                Ok(session) => session,
+                Err(error) => {
+                    if password_from_keyring {
+                        let _ = keyring_entry.delete_credential();
+                        eprintln!("Removed the cached password; enter it again on the next run.");
+                    }
+                    eprintln!("Failed to start VPN session: {error}");
+                    return;
+                }
+            };
 
         // if the vpn session is established, set keyring password
         keyring_entry
@@ -86,9 +96,6 @@ fn prompt_config() -> Config {
     let mut username = String::new();
     io::stdin().read_line(&mut username).unwrap();
     let username = username.trim().to_string();
-    print!("Password: ");
-    io::stdout().flush().unwrap();
-
     let vpn_network = Ipv4Addr::new(10, 0, 0, 0);
     let vpn_mask = Ipv4Addr::new(255, 0, 0, 0);
 

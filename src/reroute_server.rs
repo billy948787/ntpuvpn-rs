@@ -1,13 +1,10 @@
 use std::net::IpAddr;
 
 use net_route::{Handle, Route};
-use tokio::runtime::Runtime;
 
 pub struct RerouteServer {
     orig_default_route: Option<Route>,
     vpn_route: Route,
-    new_default_route: Route,
-    handle: Handle,
 }
 
 impl RerouteServer {
@@ -40,8 +37,6 @@ impl RerouteServer {
         Ok(RerouteServer {
             orig_default_route: original_route,
             vpn_route,
-            new_default_route: default_route,
-            handle,
         })
     }
     async fn add_ignore_exists(handle: &Handle, route: &Route) -> std::io::Result<()> {
