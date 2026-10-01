@@ -27,6 +27,53 @@ the VPN interface and leaves the normal default route in place. On Linux, the
 desktop keyring may not be available under `sudo`; in that case the password is
 requested each time instead of aborting the VPN connection.
 
+### Environment variables / .env
+
+Credentials can be provided without prompts using either environment variables
+or a `.env` file in the current working directory:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+# Edit .env with your username and password, then run from this directory:
+sudo ./ntpuvpn-rs
+```
+
+| Variable | Purpose |
+| --- | --- |
+| `NTPUVPN_USERNAME` | VPN username |
+| `NTPUVPN_PASSWORD` | VPN password (also used for automatic reconnection) |
+| `NTPUVPN_VPN_NETWORK` | IPv4 VPN network, defaults to `10.0.0.0` |
+| `NTPUVPN_VPN_MASK` | IPv4 netmask, defaults to `255.0.0.0` |
+
+Priority: process environment → `.env` → saved config/keyring → interactive
+prompt. Unset values fall back individually. Empty or invalid values are errors,
+not a request to fall back. With username and password supplied, no terminal is
+required; missing credentials in a noninteractive run produce an error instead
+of waiting for input.
+
+Env overrides are not saved to `config.json`. An env-provided password bypasses
+keyring reads and writes. `.env` is ignored by Git; never commit credentials.
+Use single quotes in `.env` for passwords containing `$`, `#` or spaces. Parsing
+errors do not print the failing line or password. Only the current directory's
+`.env` is read; parent directories are not searched.
+
+`sudo` normally removes environment variables. To pass exported credentials on
+Linux without putting the password in command-line arguments or shell history:
+
+```bash
+export NTPUVPN_USERNAME='your-student-id'
+read -rs -p 'VPN password: ' NTPUVPN_PASSWORD
+export NTPUVPN_PASSWORD
+sudo --preserve-env=NTPUVPN_USERNAME,NTPUVPN_PASSWORD ./ntpuvpn-rs
+unset NTPUVPN_PASSWORD
+```
+
+The above input example uses Bash. `.env` stores a plaintext password, and process
+environment values can be inspected by privileged processes; protect them
+accordingly. For an interactive login without stored plaintext, leave
+`NTPUVPN_PASSWORD` unset and continue using the keyring/password prompt.
+
 After a successful initial connection, the client automatically reconnects if
 the VPN connection ends (including an expired session). It obtains a fresh
 authentication cookie using the credentials entered at startup. Failed retries
@@ -45,13 +92,14 @@ not supported by automatic reauthentication.
 ### Reconnection tests
 
 `cargo test` covers retry backoff and cancellation without connecting to the VPN.
-On Linux, the optional TUN/route lifecycle test must run in an isolated network
-namespace so it does not modify the host's routing table:
+On Linux, the optional TUN/route lifecycle and noninteractive credential tests
+must run in an isolated network namespace with no default route, so they do not
+modify the host's routing table or contact the VPN server:
 
 ```bash
 NTPUVPN_TEST_HOST_NETNS="$(readlink /proc/self/ns/net)" \
   unshare --user --map-root-user --net \
-  cargo test tun_and_route_survive_client_replacement -- --ignored
+  cargo test -- --ignored
 ```
 
 ## Build

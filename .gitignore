@@ -1,3 +1,6 @@
 *.lock
 target/
 .DS_Store
+.env
+.env.*
+!.env.example

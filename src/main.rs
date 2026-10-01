@@ -1,46 +1,58 @@
 use std::fs;
-use std::io::{self, Write};
-use std::net::Ipv4Addr;
+use std::io::{self, IsTerminal, Write};
 
 use net_route::Handle;
-use ntpuvpn_rs::config::Config;
+use ntpuvpn_rs::config::{Config, EnvSettings};
 use ntpuvpn_rs::reroute_server::RerouteServer;
 use ntpuvpn_rs::vpn_server::VpnSession;
 use rpassword::read_password;
 #[tokio::main]
-async fn main() {
-    let config = prompt_config();
+async fn main() -> io::Result<()> {
+    let env = EnvSettings::load()?;
+    let config = prompt_config(&env)?;
 
     let service = "ntpuvpn-rs";
 
-    let keyring_entry = keyring::Entry::new(service, &config.username).ok();
-    let (password, password_from_keyring) = match keyring_entry
-        .as_ref()
-        .and_then(|entry| entry.get_password().ok())
-    {
-        Some(pwd) => {
-            println!("Retrieved password from keyring.");
-            (pwd, true)
-        }
-        None => {
-            print!("Password: ");
-            io::stdout().flush().unwrap();
-            let password = read_password().unwrap();
+    // Explicit env credentials bypass keyring entirely, including writes.
+    let keyring_entry = if env.password.is_none() {
+        keyring::Entry::new(service, &config.username).ok()
+    } else {
+        None
+    };
+    let (password, password_from_keyring) = match env.password {
+        Some(password) => (password, false),
+        None => match keyring_entry
+            .as_ref()
+            .and_then(|entry| entry.get_password().ok())
+        {
+            Some(pwd) => {
+                println!("Retrieved password from keyring.");
+                (pwd, true)
+            }
+            None => {
+                if !io::stdin().is_terminal() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "No password available; set NTPUVPN_PASSWORD or run interactively",
+                    ));
+                }
+                print!("Password: ");
+                io::stdout().flush()?;
+                let password = read_password()?;
 
-            (password, false)
-        }
+                (password, false)
+            }
+        },
     };
 
-    let vpn_prefix = config.vpn_prefix().expect("Invalid VPN netmask");
-    let handle = Handle::new().expect("Failed to access the system routing table");
+    let vpn_prefix = config.vpn_prefix()?;
+    let handle = Handle::new()?;
 
-    let Some(default_route) = handle
-        .default_route()
-        .await
-        .expect("Failed to get default route")
-    else {
-        eprintln!("No default route was found");
-        return;
+    let Some(default_route) = handle.default_route().await? else {
+        return Err(io::Error::new(
+            io::ErrorKind::NetworkUnreachable,
+            "No default route was found",
+        ));
     };
     println!("Default route: {:?}", default_route);
 
@@ -63,7 +75,7 @@ async fn main() {
                 eprintln!("Removed the cached password; enter it again on the next run.");
             }
             eprintln!("Failed to start VPN session: {error}");
-            return;
+            return Err(error);
         }
     };
 
@@ -86,7 +98,7 @@ async fn main() {
         Err(error) => {
             let _ = vpn_session.shutdown().await;
             eprintln!("Failed to configure VPN routes: {error}");
-            return;
+            return Err(error);
         }
     };
 
@@ -110,43 +122,50 @@ async fn main() {
     if let Err(error) = vpn_session.shutdown().await {
         eprintln!("Failed to stop VPN connection: {error}");
     }
+    Ok(())
 }
 
-fn prompt_config() -> Config {
-    let config_dir = dirs::config_dir()
-        .expect("Failed to get config directory")
-        .join("ntpuvpn-rs");
-    let config_path = config_dir.join("config.json");
-
-    if config_path.exists() {
-        let config_data =
-            fs::read_to_string(&config_path).expect("Failed to read existing config file");
-        let config: Config =
-            serde_json::from_str(&config_data).expect("Failed to parse existing config file");
-        return config;
-    }
-    println!("Enter VPN details:");
-
-    print!("Username: ");
-    io::stdout().flush().unwrap();
-    let mut username = String::new();
-    io::stdin().read_line(&mut username).unwrap();
-    let username = username.trim().to_string();
-    let vpn_network = Ipv4Addr::new(10, 0, 0, 0);
-    let vpn_mask = Ipv4Addr::new(255, 0, 0, 0);
-
-    let config = Config {
-        username,
-
-        vpn_network,
-        vpn_mask,
+fn prompt_config(env: &EnvSettings) -> io::Result<Config> {
+    let config_path = dirs::config_dir().map(|dir| dir.join("ntpuvpn-rs/config.json"));
+    let mut stored = match &config_path {
+        Some(path) => match fs::read_to_string(path) {
+            Ok(data) => serde_json::from_str::<Config>(&data)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid config.json"))?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Config::default(),
+            Err(error) => return Err(error),
+        },
+        None => Config::default(),
     };
+    let mut config = env.apply_config(stored.clone())?;
+    if !config.username.trim().is_empty() {
+        // Env overrides are temporary; no config file is created or changed.
+        return Ok(config);
+    }
 
-    fs::create_dir_all(&config_dir).expect("Failed to create config directory");
-    let config_path = config_dir.join("config.json");
-    let config_json = serde_json::to_string_pretty(&config).expect("Failed to serialize config");
-    fs::write(&config_path, config_json).expect("Failed to write config file");
+    if !io::stdin().is_terminal() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "No username available; set NTPUVPN_USERNAME or run interactively",
+        ));
+    }
+    print!("Username: ");
+    io::stdout().flush()?;
+    let mut username = String::new();
+    io::stdin().read_line(&mut username)?;
+    let username = username.trim().to_owned();
+    if username.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Username cannot be empty",
+        ));
+    }
+    config.username = username.clone();
+    stored.username = username;
+    let config_path =
+        config_path.ok_or_else(|| io::Error::other("No config directory available"))?;
+    fs::create_dir_all(config_path.parent().unwrap())?;
+    let config_json = serde_json::to_string_pretty(&stored).map_err(io::Error::other)?;
+    fs::write(&config_path, config_json)?;
     println!("Config saved to: {}", config_path.display());
-
-    config
+    Ok(config)
 }
