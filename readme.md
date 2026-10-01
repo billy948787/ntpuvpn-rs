@@ -27,6 +27,33 @@ the VPN interface and leaves the normal default route in place. On Linux, the
 desktop keyring may not be available under `sudo`; in that case the password is
 requested each time instead of aborting the VPN connection.
 
+After a successful initial connection, the client automatically reconnects if
+the VPN connection ends (including an expired session). It obtains a fresh
+authentication cookie using the credentials entered at startup. Failed retries
+back off from 5 seconds to at most 60 seconds; a connection lasting at least a
+minute resets this delay. OpenConnect's built-in transport reconnect remains
+enabled as well, so reauthentication happens after that recovery ends.
+
+The TUN interface stays alive across retries to keep its interface index stable.
+Each new connection refreshes its assigned address, netmask and MTU, and restores
+the configured VPN route if the OS removed it during the address update.
+Ctrl+C stops both the active connection and pending retries. The initial login
+still fails immediately on error; if credentials change while running, stop the
+client and restart it with the new password. Server-required interactive MFA is
+not supported by automatic reauthentication.
+
+### Reconnection tests
+
+`cargo test` covers retry backoff and cancellation without connecting to the VPN.
+On Linux, the optional TUN/route lifecycle test must run in an isolated network
+namespace so it does not modify the host's routing table:
+
+```bash
+NTPUVPN_TEST_HOST_NETNS="$(readlink /proc/self/ns/net)" \
+  unshare --user --map-root-user --net \
+  cargo test tun_and_route_survive_client_replacement -- --ignored
+```
+
 ## Build
 
 OpenConnect 9.20 is compiled from the source bundled by `anyconnect-sys`. The

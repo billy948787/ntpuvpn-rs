@@ -45,20 +45,27 @@ async fn main() {
     println!("Default route: {:?}", default_route);
 
     // Start VPN session
-    let mut vpn_session =
-        match VpnSession::new("ntpu.twaren.net", &config.username, &password).await {
-            Ok(session) => session,
-            Err(error) => {
-                if password_from_keyring {
-                    if let Some(entry) = &keyring_entry {
-                        let _ = entry.delete_credential();
-                    }
-                    eprintln!("Removed the cached password; enter it again on the next run.");
+    let mut vpn_session = match VpnSession::new(
+        "ntpu.twaren.net",
+        &config.username,
+        &password,
+        config.normalized_vpn_network(),
+        vpn_prefix,
+    )
+    .await
+    {
+        Ok(session) => session,
+        Err(error) => {
+            if password_from_keyring {
+                if let Some(entry) = &keyring_entry {
+                    let _ = entry.delete_credential();
                 }
-                eprintln!("Failed to start VPN session: {error}");
-                return;
+                eprintln!("Removed the cached password; enter it again on the next run.");
             }
-        };
+            eprintln!("Failed to start VPN session: {error}");
+            return;
+        }
+    };
 
     // if the vpn session is established, set keyring password
     if let Some(entry) = &keyring_entry
