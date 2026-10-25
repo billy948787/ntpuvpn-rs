@@ -159,6 +159,9 @@ impl ConnectionWorker {
             .url(&self.server)
             .protocol("nc")
             .authentication_handler(move |form| {
+                if let Some(error) = form.error().filter(|error| !error.trim().is_empty()) {
+                    eprintln!("VPN authentication error: {error}");
+                }
                 let mut valid = true;
                 for mut option in form.options().filter(|option| !option.is_ignored()) {
                     let name = option.name().unwrap_or_default().to_ascii_lowercase();

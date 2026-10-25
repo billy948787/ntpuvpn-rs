@@ -23,9 +23,10 @@ sudo ./ntpuvpn-rs
 ```
 
 The program routes the configured VPN network (by default `10.0.0.0/8`) through
-the VPN interface and leaves the normal default route in place. On Linux, the
-desktop keyring may not be available under `sudo`; in that case the password is
-requested each time instead of aborting the VPN connection.
+the VPN interface and leaves the normal default route in place. The current
+username is shown at startup; press Enter to keep it or type a replacement.
+Interactive passwords are requested on every run and are not stored in a
+keyring or config file.
 
 ### Environment variables / .env
 
@@ -46,14 +47,14 @@ sudo ./ntpuvpn-rs
 | `NTPUVPN_VPN_NETWORK` | IPv4 VPN network, defaults to `10.0.0.0` |
 | `NTPUVPN_VPN_MASK` | IPv4 netmask, defaults to `255.0.0.0` |
 
-Priority: process environment → `.env` → saved config/keyring → interactive
+Priority: process environment → `.env` → saved config → interactive
 prompt. Unset values fall back individually. Empty or invalid values are errors,
 not a request to fall back. With username and password supplied, no terminal is
 required; missing credentials in a noninteractive run produce an error instead
 of waiting for input.
 
-Env overrides are not saved to `config.json`. An env-provided password bypasses
-keyring reads and writes. `.env` is ignored by Git; never commit credentials.
+Env overrides are not saved to `config.json`. `.env` is ignored by Git; never
+commit credentials.
 Use single quotes in `.env` for passwords containing `$`, `#` or spaces. Parsing
 errors do not print the failing line or password. Only the current directory's
 `.env` is read; parent directories are not searched.
@@ -72,7 +73,7 @@ unset NTPUVPN_PASSWORD
 The above input example uses Bash. `.env` stores a plaintext password, and process
 environment values can be inspected by privileged processes; protect them
 accordingly. For an interactive login without stored plaintext, leave
-`NTPUVPN_PASSWORD` unset and continue using the keyring/password prompt.
+`NTPUVPN_PASSWORD` unset and enter the password when prompted.
 
 After a successful initial connection, the client automatically reconnects if
 the VPN connection ends (including an expired session). It obtains a fresh

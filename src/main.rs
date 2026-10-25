@@ -11,38 +11,19 @@ async fn main() -> io::Result<()> {
     let env = EnvSettings::load()?;
     let config = prompt_config(&env)?;
 
-    let service = "ntpuvpn-rs";
-
-    // Explicit env credentials bypass keyring entirely, including writes.
-    let keyring_entry = if env.password.is_none() {
-        keyring::Entry::new(service, &config.username).ok()
-    } else {
-        None
-    };
-    let (password, password_from_keyring) = match env.password {
-        Some(password) => (password, false),
-        None => match keyring_entry
-            .as_ref()
-            .and_then(|entry| entry.get_password().ok())
-        {
-            Some(pwd) => {
-                println!("Retrieved password from keyring.");
-                (pwd, true)
+    let password = match env.password {
+        Some(password) => password,
+        None => {
+            if !io::stdin().is_terminal() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "No password available; set NTPUVPN_PASSWORD or run interactively",
+                ));
             }
-            None => {
-                if !io::stdin().is_terminal() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "No password available; set NTPUVPN_PASSWORD or run interactively",
-                    ));
-                }
-                print!("Password: ");
-                io::stdout().flush()?;
-                let password = read_password()?;
-
-                (password, false)
-            }
-        },
+            print!("Password: ");
+            io::stdout().flush()?;
+            read_password()?
+        }
     };
 
     let vpn_prefix = config.vpn_prefix()?;
@@ -68,23 +49,10 @@ async fn main() -> io::Result<()> {
     {
         Ok(session) => session,
         Err(error) => {
-            if password_from_keyring {
-                if let Some(entry) = &keyring_entry {
-                    let _ = entry.delete_credential();
-                }
-                eprintln!("Removed the cached password; enter it again on the next run.");
-            }
             eprintln!("Failed to start VPN session: {error}");
             return Err(error);
         }
     };
-
-    // if the vpn session is established, set keyring password
-    if let Some(entry) = &keyring_entry
-        && let Err(error) = entry.set_password(&password)
-    {
-        eprintln!("Warning: failed to save password in keyring: {error}");
-    }
 
     let mut reroute_server = match RerouteServer::new(
         vpn_session.interface_index,
@@ -137,30 +105,43 @@ fn prompt_config(env: &EnvSettings) -> io::Result<Config> {
         None => Config::default(),
     };
     let mut config = env.apply_config(stored.clone())?;
-    if !config.username.trim().is_empty() {
+    if env.username.is_some() {
         // Env overrides are temporary; no config file is created or changed.
         return Ok(config);
     }
 
     if !io::stdin().is_terminal() {
+        if !config.username.trim().is_empty() {
+            return Ok(config);
+        }
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "No username available; set NTPUVPN_USERNAME or run interactively",
         ));
     }
-    print!("Username: ");
+    if config.username.trim().is_empty() {
+        print!("Username: ");
+    } else {
+        print!("Username [{}]: ", config.username);
+    }
     io::stdout().flush()?;
     let mut username = String::new();
     io::stdin().read_line(&mut username)?;
-    let username = username.trim().to_owned();
-    if username.is_empty() {
+    let username = username.trim();
+    if !username.is_empty() {
+        config.username = username.to_owned();
+        stored.username = username.to_owned();
+    }
+    if config.username.trim().is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Username cannot be empty",
         ));
     }
-    config.username = username.clone();
-    stored.username = username;
+
+    if username.is_empty() {
+        return Ok(config);
+    }
     let config_path =
         config_path.ok_or_else(|| io::Error::other("No config directory available"))?;
     fs::create_dir_all(config_path.parent().unwrap())?;

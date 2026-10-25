@@ -95,7 +95,7 @@ fn dotenv_credentials_skip_prompts_and_do_not_change_saved_config() {
     )
     .unwrap();
     // Process env repairs the invalid file mask; .env credentials override
-    // saved settings and bypass keyring. Stop before actual VPN login.
+    // saved settings and interactive prompts. Stop before actual VPN login.
     assert_error(
         run(&dir, &[("NTPUVPN_VPN_MASK", "255.0.0.0")]),
         "No default route was found",
