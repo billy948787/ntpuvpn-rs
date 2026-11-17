@@ -8,6 +8,7 @@ fn run(dir: &TempDir, values: &[(&str, &str)]) -> Output {
         .env_clear()
         .env("HOME", dir.path())
         .env("XDG_CONFIG_HOME", dir.path().join("config"))
+        .env("APPDATA", dir.path().join("config"))
         .envs(values.iter().copied())
         .current_dir(dir.path())
         .stdin(Stdio::null())

@@ -26,6 +26,15 @@ impl RerouteServer {
         }
         Self::add_ignore_exists(&handle, &original_route).await?;
 
+        Self::for_interface(vpn_interface_index, vpn_network, vpn_prefix).await
+    }
+
+    pub async fn for_interface(
+        vpn_interface_index: u32,
+        vpn_network: Ipv4Addr,
+        vpn_prefix: u8,
+    ) -> std::io::Result<Self> {
+        let handle = Handle::new()?;
         let vpn_route =
             Route::new(IpAddr::V4(vpn_network), vpn_prefix).with_ifindex(vpn_interface_index);
         let vpn_route_added = Self::add_ignore_exists(&handle, &vpn_route).await?;
@@ -41,7 +50,7 @@ impl RerouteServer {
             .list()
             .await?
             .iter()
-            .any(|existing| existing == route)
+            .any(|existing| same_route(existing, route))
         {
             println!("Route already exists, skipping add: {:?}", route);
             return Ok(false);
@@ -68,6 +77,51 @@ impl RerouteServer {
             }
             Err(error) => Err(error),
         }
+    }
+}
+
+fn same_route(existing: &Route, requested: &Route) -> bool {
+    #[cfg(not(windows))]
+    {
+        existing == requested
+    }
+
+    // Windows fills in LUID, metric and an unspecified on-link gateway when
+    // listing routes. Those defaults must not make an existing route invisible.
+    #[cfg(windows)]
+    {
+        let gateway = |gateway: Option<IpAddr>| gateway.filter(|ip| !ip.is_unspecified());
+        existing.destination == requested.destination
+            && existing.prefix == requested.prefix
+            && existing.ifindex == requested.ifindex
+            && gateway(existing.gateway) == gateway(requested.gateway)
+            && requested
+                .metric
+                .is_none_or(|metric| existing.metric == Some(metric))
+            && requested
+                .luid
+                .is_none_or(|luid| existing.luid == Some(luid))
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compares_windows_routes_with_system_defaults() {
+        let requested = Route::new("10.0.0.0".parse().unwrap(), 8).with_ifindex(42);
+        let mut existing = requested
+            .clone()
+            .with_gateway(Ipv4Addr::UNSPECIFIED.into())
+            .with_metric(0)
+            .with_luid(123);
+        assert!(same_route(&existing, &requested));
+        existing.ifindex = Some(43);
+        assert!(!same_route(&existing, &requested));
+        existing.ifindex = Some(42);
+        existing.gateway = Some("192.168.1.1".parse().unwrap());
+        assert!(!same_route(&existing, &requested));
     }
 }
 
