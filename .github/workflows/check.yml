@@ -1,0 +1,32 @@
+name: Check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install native dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libdbus-1-dev libssl-dev libxml2-dev pkg-config zlib1g-dev
+      - name: Install native dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install openssl@3 pkgconf
+      - run: cargo fmt --all -- --check
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings

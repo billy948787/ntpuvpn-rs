@@ -3,11 +3,21 @@ use std::io::{self, IsTerminal, Write};
 
 use net_route::Handle;
 use ntpuvpn_rs::config::{Config, EnvSettings};
+#[cfg(unix)]
 use ntpuvpn_rs::reroute_server::RerouteServer;
 use ntpuvpn_rs::vpn_server::VpnSession;
 use rpassword::read_password;
+
+#[cfg(windows)]
+mod windows_elevation;
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    #[cfg(windows)]
+    if windows_elevation::prepare().await? {
+        return Ok(());
+    }
+
     let env = EnvSettings::load()?;
     let config = prompt_config(&env)?;
 
@@ -25,6 +35,9 @@ async fn main() -> io::Result<()> {
             read_password()?
         }
     };
+
+    #[cfg(windows)]
+    windows_elevation::require_elevated()?;
 
     let vpn_prefix = config.vpn_prefix()?;
     let handle = Handle::new()?;
@@ -54,6 +67,7 @@ async fn main() -> io::Result<()> {
         }
     };
 
+    #[cfg(unix)]
     let mut reroute_server = match RerouteServer::new(
         vpn_session.interface_index,
         config.normalized_vpn_network(),
@@ -84,6 +98,7 @@ async fn main() -> io::Result<()> {
         },
     }
 
+    #[cfg(unix)]
     if let Err(error) = reroute_server.shutdown().await {
         eprintln!("Failed to remove VPN route: {error}");
     }
@@ -94,7 +109,13 @@ async fn main() -> io::Result<()> {
 }
 
 fn prompt_config(env: &EnvSettings) -> io::Result<Config> {
-    let config_path = dirs::config_dir().map(|dir| dir.join("ntpuvpn-rs/config.json"));
+    #[cfg(windows)]
+    let config_dir = std::env::var_os("APPDATA")
+        .map(std::path::PathBuf::from)
+        .or_else(dirs::config_dir);
+    #[cfg(not(windows))]
+    let config_dir = dirs::config_dir();
+    let config_path = config_dir.map(|dir| dir.join("ntpuvpn-rs/config.json"));
     let mut stored = match &config_path {
         Some(path) => match fs::read_to_string(path) {
             Ok(data) => serde_json::from_str::<Config>(&data)

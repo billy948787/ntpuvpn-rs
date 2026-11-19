@@ -4,16 +4,31 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyconnect = { version = "0.1.1", default-features = false, features = ["static"] }
 net-route = "0.4.6"
 rpassword = "7.4.0"
 serde = { version = "1.0.226", features = ["derive"] }
 tokio = { version = "1.47.1", features = ["full"] }
-tun = "0.8.14"
 serde_json = "1.0.145"
 dirs = "6.0.0"
 dotenvy = "0.15.7"
 network-interface = "2.0.3"
+
+[target.'cfg(unix)'.dependencies]
+anyconnect = { version = "0.1.1", default-features = false, features = ["static"] }
+tun = "0.8.14"
+
+[target.'cfg(windows)'.dependencies]
+tempfile = "3"
+windows-sys = { version = "0.59", features = [
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Console",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 tempfile = "3"
